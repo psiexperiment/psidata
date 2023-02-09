@@ -58,7 +58,7 @@ class CalibrationFile(Recording):
         '''
         Return PointCalibration as derived from tone data
         '''
-        from psi.controller.calibration.api import PointCalibration
+        from psiaudio.calibration import PointCalibration
         if channel_name is None:
             channel_name = _get_unique(self.tone_sens, 'channel_name')
         sens = self.tone_sens.loc[channel_name]['sens']

@@ -1,0 +1,33 @@
+[project]
+name = "psidata"
+description = "Lightweight wrapper for managing psiexperiment data"
+readme = "README.md"
+requires-python = ">=3.7"
+license = {file = "LICENSE.txt"}
+authors = [
+    {name = "Brad Buran", email="bburan@alum.mit.edu"},
+    {name = "Brad Buran", email="buran@ohsu.edu"},
+    {name = "Buran Consulting, LLC", email="info@bradburan.com"}
+]
+maintainers = [
+    {name = "Brad Buran", email="bburan@alum.mit.edu"},
+    {name = "Brad Buran", email="buran@ohsu.edu"},
+    {name = "Buran Consulting, LLC", email="info@bradburan.com"}
+]
+dependencies = [
+    "numpy",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+docs = ["sphinx", "sphinx_rtd_theme"]
+test = ["pytest", "pytest-console-scripts"]
+bcolz-backend = ["bcolz"]						  		  # No public build exists for Python 3.7+. You will have to make this yourself.
+zarr-backend = ["zarr"]
+
+[build-system]
+requires = ["setuptools>=61.2", "wheel", "setuptools_scm[toml]>=3.4.3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "psidata/version.py"
