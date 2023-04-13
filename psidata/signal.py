@@ -73,16 +73,36 @@ class Signal:
         return df
 
     def get_segments(self, times, offset, duration, channel=0, detrend=None,
-                     downsample=None, cb=None, cb_n=1000, allow_partial=False):
+                     downsample=None, cb=None, cb_n=1000, allow_partial=False,
+                     preload=True):
+        '''
+        Load segments into dataframe
+
+        Parameters
+        ----------
+        times : {list, tuple, 1D array}
+            Timestamps (in seconds) of segments to load
+        offset : float
+            Offset (in seconds) relative to timestamp. If a pre-timestamp
+            (i.e., prestimulus) baseline is needed, specify a negative number.
+        duration : float
+            Duration of segment to extract, relative to timestamp + offset.
+        ...
+        preload : bool
+            If True, load entire array into memory before extracting segments.
+            This is usually much faster.
+        '''
         if cb is None:
             cb = lambda *a, **kw: None
+
+        data = self[:] if preload else self
 
         times = np.asarray(times)
         indices = np.round((times + offset) * self.fs).astype('i')
         samples = round(duration * self.fs)
 
         if not allow_partial:
-            m = (indices >= 0) & ((indices + samples) < self.shape[-1])
+            m = (indices >= 0) & ((indices + samples) < data.shape[-1])
             if not m.all():
                 i = np.flatnonzero(~m)
                 missing = ', '.join(str(e) for e in i)
@@ -97,12 +117,12 @@ class Signal:
         for j, i in enumerate(indices):
             # This hack is in-place to handle legacy data that was stored in 1D
             # format rather than the newer 2D format.
-            if len(self.shape) == 1:
+            if len(data.shape) == 1:
                 if channel != 0:
                     raise ValueError(f'Data is 1D. Cannot load channel {channel}.')
-                v = self[i:i+samples]
+                v = data[i:i+samples]
             else:
-                v = self[channel, i:i+samples]
+                v = data[channel, i:i+samples]
             pad_n = samples - v.shape[-1]
             if pad_n:
                 if v.ndim == 2:
@@ -136,7 +156,7 @@ class Signal:
         t = np.arange(samples)/fs + offset
         columns = pd.Index(t, name='time')
         df = pd.DataFrame(values, index=index, columns=columns)
-        return df.reindex(times)
+        return df.reindex(times)k
 
     def get_segment(self, time, *args, **kwargs):
         return self.get_segments([time], *args, **kwargs).iloc[0]
