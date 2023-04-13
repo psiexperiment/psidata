@@ -156,7 +156,7 @@ class Signal:
         t = np.arange(samples)/fs + offset
         columns = pd.Index(t, name='time')
         df = pd.DataFrame(values, index=index, columns=columns)
-        return df.reindex(times)k
+        return df.reindex(times)
 
     def get_segment(self, time, *args, **kwargs):
         return self.get_segments([time], *args, **kwargs).iloc[0]
