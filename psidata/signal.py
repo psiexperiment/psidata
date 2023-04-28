@@ -36,6 +36,9 @@ def find_object(node, obj_id):
 
 class Signal:
 
+    def __init__(self):
+        super().__init__()
+        self._data = None
 
     def get_calibration(self):
         cal = self.array.attrs['source']['calibration']
@@ -95,7 +98,17 @@ class Signal:
         if cb is None:
             cb = lambda *a, **kw: None
 
-        data = self[:] if preload else self
+        if self._data is None and preload:
+            # If preload is True and we have not already loaded the data, loaad
+            # it into a cached attribute.
+            data = self._data = self[:]
+        elif self._data is not None:
+            # Else, have we already loaded this and cached it for some other
+            # reason? If so, go ahead and use it.
+            data = self._data
+        else:
+            # Otherwise, don't preload (e.g., for extremely large datasets).
+            data = self
 
         times = np.asarray(times)
         indices = np.round((times + offset) * self.fs).astype('i')

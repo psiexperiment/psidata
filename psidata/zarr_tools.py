@@ -26,6 +26,7 @@ class ZarrSignal(Signal):
         return cls(array)
 
     def __init__(self, array):
+        super().__init__()
         self.array = array
 
     @property
