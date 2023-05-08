@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy import signal
 
-from . import Signal
+from .signal import Signal
 
 
 # Max size of LRU cache
