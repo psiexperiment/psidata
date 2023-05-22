@@ -80,6 +80,7 @@ def carray_to_dataframe(ctable, columns=None, orient='columns'):
 class BcolzSignal(Signal):
 
     def __init__(self, base_path):
+        super().__init__()
         self.base_path = base_path
 
     @property
