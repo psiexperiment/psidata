@@ -174,6 +174,7 @@ def load_ctable_as_df(path, decode=True, archive=True):
 class BcolzSignal(Signal):
 
     def __init__(self, base_path):
+        super().__init__()
         self.base_path = base_path
 
     @property
