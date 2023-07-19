@@ -1,10 +1,13 @@
 import blosc
 import functools
 import json
+from pathlib import Path
 import struct
-import numpy as np
 
-from . import Signal
+import numpy as np
+import pandas as pd
+
+from .signal import Signal
 
 
 BLOSCPACK_HEADER_LENGTH = 16
@@ -92,6 +95,7 @@ def get_len_of_range(start, stop, step):
 class LegacyBcolzArray:
 
     def __init__(self, rootdir):
+        rootdir = Path(rootdir)
         self.filename = rootdir
         self.attrs_filename = rootdir / '__attrs__'
         self.sizes_filename = rootdir / 'meta' / 'sizes'
@@ -142,7 +146,32 @@ class LegacyBcolzArray:
         return arr
 
 
-class LegacyBcolzSignal(Signal):
+def load_ctable_as_df(path, decode=True, archive=True):
+    path = Path(path)
+    csv_path = path.with_suffix('.csv')
+    if csv_path.exists():
+        return pd.io.parsers.read_csv(csv_path)
+
+    rootdirs_file = path / '__rootdirs__'
+    rootdirs = json.loads(rootdirs_file.read_text())['names']
+
+    data = {}
+    for rootdir in rootdirs:
+        rootdir_path = path / rootdir
+        data[rootdir] = BcolzSignal(path / rootdir)[:]
+
+    df = pd.DataFrame.from_dict(data)
+    if decode:
+        for column, arr in data.items():
+            if arr.dtype.char == 'S':
+                df[column] = df[column].str.decode('utf8')
+
+    if archive:
+        df.to_csv(csv_path, index=False)
+    return df
+
+
+class BcolzSignal(Signal):
 
     def __init__(self, base_path):
         self.base_path = base_path
