@@ -16,13 +16,15 @@ maintainers = [
 ]
 dependencies = [
     "numpy",
+	"pandas",
 ]
 dynamic = ["version"]
 
 [project.optional-dependencies]
 docs = ["sphinx", "sphinx_rtd_theme"]
 test = ["pytest", "pytest-console-scripts"]
-bcolz-backend = ["bcolz"]						  		  # No public build exists for Python 3.7+. You will have to make this yourself.
+bcolz-backend = ["bcolz"]
+legacy-bcolz-backend = ["blosc"]
 zarr-backend = ["zarr"]
 
 [build-system]
