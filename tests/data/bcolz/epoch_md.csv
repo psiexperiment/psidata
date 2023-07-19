@@ -1,0 +1,5 @@
+,t0,duration,trial_type,exclude,trial_number
+0,1.32,5,interleaved,False,1
+1,2.32,1,conventional,True,2
+2,4.32,5,interleaved,True,3
+3,5.32,1,conventional,False,4
