@@ -9,6 +9,14 @@ import numpy as np
 import pandas as pd
 
 
+try:
+    from . import bcolz_tools
+    log.info('Using actual bcolz backend')
+except ImportError:
+    log.info('Using legacy bcolz backend')
+    from . import legacy_bcolz_tools as bcolz_tools
+
+
 class Recording:
     '''
     Wrapper around a recording created by psiexperiment
@@ -152,8 +160,7 @@ class BaseStore:
 
     @functools.lru_cache()
     def _load_bcolz_signal(self, name):
-        from .bcolz_tools import BcolzSignal
-        return BcolzSignal(self.base_path / name)
+        return bcolz_tools.BcolzSignal(self.base_path / name)
 
     @functools.lru_cache()
     def _load_zarr_signal(self, name):
@@ -162,8 +169,7 @@ class BaseStore:
 
     @functools.lru_cache()
     def _load_bcolz_table(self, name):
-        from .bcolz_tools import load_ctable_as_df
-        return load_ctable_as_df(self.base_path / name)
+        return bcolz_tools.load_ctable_as_df(self.base_path / name)
 
     def _get_text_table_stream(self, name):
         raise NotImplementedError
