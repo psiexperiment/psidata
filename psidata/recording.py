@@ -13,8 +13,11 @@ try:
     from . import bcolz_tools
     log.info('Using actual bcolz backend')
 except ImportError:
-    log.info('Using legacy bcolz backend')
-    from . import legacy_bcolz_tools as bcolz_tools
+    try:
+        from . import legacy_bcolz_tools as bcolz_tools
+        log.info('Using legacy bcolz backend')
+    except ImportError:
+        log.info('Legacy bcolz backend is not available')
 
 
 class Recording:
