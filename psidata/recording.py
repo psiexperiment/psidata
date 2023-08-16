@@ -3,6 +3,7 @@ log = logging.getLogger(__name__)
 
 import functools
 from pathlib import Path
+import yaml
 import zipfile
 
 import numpy as np
@@ -72,6 +73,19 @@ class Recording:
             self._store = DirStore(self.base_path, self._ttable_indices)
         else:
             raise ValueError(f'Unrecognized recording format at {base_path}')
+
+    def get_parameters(self):
+        preferences = yaml.safe_load(self._store._get_text_stream('initial.preferences'))
+        expressions = {}
+        for context_items in preferences['context']['parameters'].values():
+            for name, setting in context_items.items():
+                if 'expression' in setting:
+                    expressions[name] = setting['expression']
+                elif 'selected' in setting:
+                    expressions[name] = setting['selected']
+                else:
+                    raise ValueError
+        return expressions
 
     def get_setting(self, setting_name):
         '''
@@ -174,14 +188,14 @@ class BaseStore:
     def _load_bcolz_table(self, name):
         return bcolz_tools.load_ctable_as_df(self.base_path / name)
 
-    def _get_text_table_stream(self, name):
+    def _get_text_stream(self, name):
         raise NotImplementedError
 
     @functools.lru_cache()
     def _load_text_table(self, name):
         import pandas as pd
         index_col = self._ttable_indices.get(name, None)
-        with self._get_text_table_stream(name) as stream:
+        with self._get_text_stream(f'{name}.csv') as stream:
             df = pd.read_csv(stream, index_col=index_col)
 
         drop = [c for c in df.columns if c.startswith('Unnamed:')]
@@ -195,8 +209,8 @@ class DirStore(BaseStore):
         self._ttable_indices = ttable_indices
         self._refresh_names()
 
-    def _get_text_table_stream(self, name):
-        path = (self.base_path / name).with_suffix('.csv')
+    def _get_text_stream(self, name):
+        path = self.base_path / name
         return path.open()
 
     def _refresh_names(self):
@@ -228,8 +242,8 @@ class ZipStore(BaseStore):
             elif name.endswith('meta'):
                 raise ValueError('ZipRecording does not support bcolz')
 
-    def _get_text_table_stream(self, name):
-        return self.zip_fh.open(f'{name}.csv')
+    def _get_text_stream(self, name):
+        return self.zip_fh.open(name)
 
     @functools.lru_cache()
     def _load_zarr_signal(self, name):
