@@ -44,9 +44,12 @@ class Signal:
         cal = self.array.attrs['source']['calibration']
         if isinstance(cal, str):
             cal = find_object(self.array.attrs, cal)
-        freq = cal['frequency']
-        sens = cal['sensitivity']
-        return calibration.InterpCalibration(freq, sens)
+
+        cal = cal.copy()
+        cal.pop('__id__')
+        klass_name = cal.pop('__type__')
+        klass = getattr(calibration, klass_name)
+        return klass(**cal)
 
     def get_epochs(self, md, offset, duration, detrend=None, downsample=None,
                    columns='auto', cb=None):
@@ -99,7 +102,7 @@ class Signal:
             cb = lambda *a, **kw: None
 
         if self._data is None and preload:
-            # If preload is True and we have not already loaded the data, loaad
+            # If preload is True and we have not already loaded the data, load
             # it into a cached attribute.
             data = self._data = self[:]
         elif self._data is not None:
