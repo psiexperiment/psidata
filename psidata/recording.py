@@ -111,7 +111,7 @@ class Recording:
         table = getattr(self, self._setting_table)
         values = np.unique(table[setting_name])
         if len(values) != 1:
-            raise ValueError('{name} is not unique across all epochs.')
+            raise ValueError(f'{setting_name} is not unique across all epochs.')
         return values[0]
 
     def get_setting_default(self, setting_name, default):
