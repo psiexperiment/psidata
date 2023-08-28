@@ -94,6 +94,8 @@ class Signal:
         duration : float
             Duration of segment to extract, relative to timestamp + offset.
         ...
+        downsample : {None, int}
+            Decimation factor of signal.
         preload : bool
             If True, load entire array into memory before extracting segments.
             This is usually much faster.
