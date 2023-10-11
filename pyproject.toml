@@ -17,7 +17,7 @@ maintainers = [
 dependencies = [
     "numpy",
 	"pandas",
-	"yaml",
+	"pyyaml",
 ]
 dynamic = ["version"]
 
