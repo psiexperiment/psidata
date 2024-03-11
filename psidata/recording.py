@@ -21,6 +21,9 @@ except ImportError:
         log.info('Legacy bcolz backend is not available')
 
 
+UNSET = object()
+
+
 class Recording:
     '''
     Wrapper around a recording created by psiexperiment
@@ -93,7 +96,7 @@ class Recording:
                     raise ValueError
         return expressions
 
-    def get_setting(self, setting_name):
+    def get_setting(self, setting_name, default=UNSET):
         '''
         Return value for setting
 
@@ -115,7 +118,13 @@ class Recording:
             If the setting does not exist.
         '''
         table = getattr(self, self._setting_table)
-        values = np.unique(table[setting_name])
+        try:
+            values = np.unique(table[setting_name])
+        except KeyError:
+            if default is not UNSET:
+                return default
+            else:
+                raise
         if len(values) != 1:
             raise ValueError(f'{setting_name} is not unique across all epochs.')
         return values[0]
