@@ -64,15 +64,21 @@ class Recording:
     #: to extract.
     _setting_table = None
 
-    def __init__(self, base_path, setting_table=None):
+    def __init__(self, base_path, setting_table=None, store_class=None):
         self._setting_table = setting_table
         self.base_path = Path(base_path)
-        if self.base_path.suffix == '.zip':
-            self._store = ZipStore(self.base_path, self._ttable_indices)
-        elif self.base_path.is_dir():
-            self._store = DirStore(self.base_path, self._ttable_indices)
-        else:
-            raise ValueError(f'Unrecognized recording format at {base_path}')
+        if store_class is None:
+            if self.base_path.suffix == '.zip':
+                store_class = ZipStore
+            elif (self.base_path / self.base_path.with_suffix('.zip').name).exists():
+                store_class = NestedZipStore
+            elif self.base_path.is_dir():
+                store_class = DirStore
+            else:
+                raise ValueError(f'Unrecognized recording format at {base_path}')
+        elif isinstance(store_class, str):
+            store_class = globals()[store_class]
+        self._store = store_class(self.base_path, self._ttable_indices)
 
     def get_parameters(self):
         preferences = yaml.safe_load(self._store._get_text_stream('initial.preferences'))
@@ -249,3 +255,10 @@ class ZipStore(BaseStore):
     def _load_zarr_signal(self, name):
         from .zarr_tools import ZarrSignal
         return ZarrSignal.from_zip(self.base_path, name)
+
+
+class NestedZipStore(ZipStore):
+
+    def __init__(self, base_path, ttable_indices):
+        base_path = base_path / base_path.with_suffix('.zip').name
+        super().__init__(base_path, ttable_indices)
