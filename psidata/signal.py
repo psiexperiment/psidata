@@ -46,7 +46,7 @@ class Signal:
             cal = find_object(self.array.attrs, cal)
 
         cal = cal.copy()
-        cal.pop('__id__')
+        cal.pop('__id__', None)
         klass_name = cal.pop('__type__')
         klass = getattr(calibration, klass_name)
         return klass(**cal)
