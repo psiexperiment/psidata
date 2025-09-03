@@ -28,6 +28,11 @@ bcolz-backend = ["bcolz"]
 legacy-bcolz-backend = ["blosc"]
 zarr-backend = ["zarr"]
 
+[project.scripts]
+psidata-zip-data = "psidata.postprocess:zip_data"
+psidata-split-data = "psidata.postprocess:split_data"
+psidata-merge-pdf = "psidata.postprocess:merge_pdf"
+
 [build-system]
 requires = ["setuptools>=61.2", "wheel", "setuptools_scm[toml]>=3.4.3"]
 build-backend = "setuptools.build_meta"
