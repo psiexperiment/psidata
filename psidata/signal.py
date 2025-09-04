@@ -174,7 +174,9 @@ class Signal:
         t = np.arange(samples)/fs + offset
         columns = pd.Index(t, name='time')
         df = pd.DataFrame(values, index=index, columns=columns)
-        return df.reindex(times)
+        df = df.reindex(times)
+        df.attrs['fs'] = fs
+        return df
 
     def get_segment(self, time, *args, **kwargs):
         return self.get_segments([time], *args, **kwargs).iloc[0]
@@ -196,14 +198,17 @@ class Signal:
         # the same index and columns.
         filt = signal.filtfilt(b, a, df.values, axis=-1)
         df_filt = pd.DataFrame(filt, index=df.index, columns=df.columns)
-        return df_filt.loc[:, offset:offset+duration]
+        df_filt = df_filt.loc[:, offset:offset+duration]
+        df_filt.attrs['fs'] = fs
+        return df_filt
 
-    def get_random_segments(self, n, offset, duration, detrend, downsample):
+    def get_random_segments(self, n, offset, duration, detrend, downsample,
+                            cb=None):
         t_min = -offset
         t_max = self.duration-duration-offset
         times = np.random.uniform(t_min, t_max, size=n)
-        return self.get_segments(times, offset, duration, detrend,
-                                 downsample=downsample)
+        return self.get_segments(times, offset, duration, detrend=detrend,
+                                 downsample=downsample, cb=cb)
 
     def get_segments_filtered(self, times, *args, **kwargs):
         fn = functools.partial(self.get_segments, times)
