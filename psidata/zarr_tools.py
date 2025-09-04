@@ -16,7 +16,9 @@ class ZarrSignal(Signal):
 
     @classmethod
     def from_zip(cls, path, name):
-        array = zarr.open(store=str(path), mode='r', path=f'{name}.zarr')
+        # See https://github.com/zarr-developers/zarr-python/issues/2831
+        store = zarr.storage.ZipStore(path, mode='r')
+        array = zarr.open(store=store, mode='r', path=f'{name}.zarr')
         return cls(array)
 
     @classmethod
