@@ -61,11 +61,16 @@ def add_default_options(parser):
     parser.add_argument('--halt-on-error', action='store_true', help='Stop on error?')
     parser.add_argument('--logging-level', type=str, help='Logging level')
     parser.add_argument('--n-jobs', type=int, default=1)
+    parser.add_argument('--dataset-manager', type=str, default='combined-zip',
+                        choices=DATASET_MANAGERS.keys(),
+                        help='Dataset manager to use')
 
 
 def process_files(glob_pattern, fn, folder, cb='tqdm', mode='process',
                   halt_on_error=False, logging_level=None,
-                  expected_suffixes=None, n_jobs=1):
+                  expected_suffixes=None, n_jobs=1, dataset_manager='split'):
+
+    manager_class = DATASET_MANAGERS[dataset_manager]
 
     # Override callback if we are running in parallel otherwise it's messy
     if n_jobs > 1:
@@ -76,21 +81,18 @@ def process_files(glob_pattern, fn, folder, cb='tqdm', mode='process',
         nonlocal mode
         nonlocal expected_suffixes
 
-        try:
-            manager = DatasetManager(filename, cb=cb)
-            if mode == 'process' and manager.is_processed(expected_suffixes):
-                pass
-            elif mode == 'process' and not manager.is_processed(expected_suffixes):
-                fn(filename, manager=manager)
-                return True
-            elif mode == 'reprocess':
-                fn(filename, manager=manager)
-                return True
-            elif mode == 'clear':
-                manager.clear(expected_suffixes)
-                return True
-        except Exception as e:
-            raise
+        manager = manager_class(filename, cb=cb)
+        if mode == 'process' and manager.is_processed(expected_suffixes):
+            pass
+        elif mode == 'process' and not manager.is_processed(expected_suffixes):
+            fn(filename, manager=manager)
+            return True
+        elif mode == 'reprocess':
+            fn(filename, manager=manager)
+            return True
+        elif mode == 'clear':
+            manager.clear(expected_suffixes)
+            return True
         return False
 
     if logging_level is not None:
@@ -242,15 +244,41 @@ class BaseDatasetManager:
                 filename.unlink()
 
 
-class CombinedDatasetManager(BaseDatasetManager):
+class ClassicDatasetManager(BaseDatasetManager):
+    '''
+    This saves the processed data to the same folder as the experiment. No
+    infomrmation is added to the requested file suffix.
+
+    This is the classic approach that was previously implemented.
+    '''
+    def get_proc_path(self):
+        return self.path
+
+    def get_proc_filename(self, suffix, mkdir=True):
+        proc_path = self.get_proc_path()
+        proc_path.mkdir(exist_ok=True, parents=True)
+        return proc_path / f'{suffix}'
+
+
+class CombinedZipDatasetManager(BaseDatasetManager):
+    '''
+    This saves the processed data to the parent folder of the experiment
+
+    This is a special-case for experiments that have been converted to a zip
+    file and then stored in a folder with the same name as the zip file.
+    '''
 
     def get_proc_path(self):
         return self.path.parent
 
 
 class SplitDatasetManager(BaseDatasetManager):
+    '''
+    This saves the processed data to a different directory than that of the
+    experiment.
+    '''
 
-    def __init__(self, path, raw_dir=None, proc_dir=None, file_template=None):
+    def __init__(self, path, raw_dir=None, proc_dir=None, cb='tqdm', file_template=None):
         '''
         Manages paths of processed files given the relative path between the
         raw and processed directory structure.
@@ -264,7 +292,7 @@ class SplitDatasetManager(BaseDatasetManager):
         file_template : {None, str}
             If None, defaults to the filename stem
         '''
-        super().__init__(path, file_template)
+        super().__init__(path, cb=cb, file_template=file_template)
         if raw_dir is None:
             raw_dir = os.environ.get('RAW_DATA_DIR', None)
         if proc_dir is None:
@@ -276,6 +304,8 @@ class SplitDatasetManager(BaseDatasetManager):
         return self.proc_dir / self.path.parent.relative_to(self.raw_dir) / self.path.stem
 
 
-# TODO: How do we make this so that it is a bit more clever about selecting the
-# correct manager based on preference?
-DatasetManager = CombinedDatasetManager
+DATASET_MANAGERS = {
+    'classic': ClassicDatasetManager,
+    'combined-zip': CombinedZipDatasetManager,
+    'split': SplitDatasetManager,
+}
