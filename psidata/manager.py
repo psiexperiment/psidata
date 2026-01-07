@@ -66,9 +66,31 @@ def add_default_options(parser):
                         help='Dataset manager to use')
 
 
+def default_find_paths(folder, glob_pattern):
+    # Adds a shortcut for situations where the full path to a single data
+    # folder is provided.
+    folder = Path(folder).resolve()
+    if fnmatch.fnmatch(folder.name, glob_pattern):
+        yield folder.name
+        return
+
+    for filename in folder.glob(glob_pattern):
+        if filename.suffix == '.md5':
+            # Skip the MD5 checksum files
+            continue
+        if filename.is_dir():
+            # Make sure that it is actually a psiexperiment recording
+            if not (filename / 'io.json').exists():
+                continue
+        elif filename.suffix != '.zip':
+            continue
+        yield filename
+
+
 def process_files(glob_pattern, fn, folder, cb='tqdm', mode='process',
                   halt_on_error=False, logging_level=None,
-                  expected_suffixes=None, n_jobs=1, dataset_manager='split'):
+                  expected_suffixes=None, n_jobs=1, dataset_manager='split',
+                  pathfinder=default_find_paths):
 
     manager_class = DATASET_MANAGERS[dataset_manager]
 
@@ -102,25 +124,8 @@ def process_files(glob_pattern, fn, folder, cb='tqdm', mode='process',
     skipped = []
     errors = []
 
-    # Adds a shortcut for situations where the full path to a single data
-    # folder is provided.
-    folder = Path(folder).resolve()
-    if fnmatch.fnmatch(folder.name, glob_pattern):
-        _process_file(folder)
-        return
-
     jobs = []
-    for filename in folder.glob(glob_pattern):
-        if filename.suffix == '.md5':
-            # Skip the MD5 checksum files
-            continue
-        if filename.is_dir():
-            # Make sure that it is actually a psiexperiment recording
-            if not (filename / 'io.json').exists():
-                continue
-        elif filename.suffix != '.zip':
-            continue
-
+    for filename in pathfinder(folder, glob_pattern):
         if n_jobs == 1:
             try:
                 if _process_file(filename):
