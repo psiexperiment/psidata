@@ -1,8 +1,10 @@
 import blosc
 import functools
 import json
+import io
 from pathlib import Path
 import struct
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -117,8 +119,19 @@ class LegacyBcolzArray:
             blosc_header = decode_blosc_header(blosc_header_raw)
             ctbytes = blosc_header['ctbytes']
             fh.seek(-BLOSC_HEADER_LENGTH, 1)
-            b = fh.read(ctbytes)
-        return np.frombuffer(blosc.decompress(b), dtype=self.dtype)
+            b = blosc.decompress(fh.read(ctbytes))
+
+        if self.dtype == 'O':
+            buffer = io.BytesIO(b)
+            data = []
+            try:
+                while True:
+                    data.append(pickle.load(buffer))
+            except EOFError:
+                pass
+            return np.array(data, dtype=self.dtype)
+        else:
+            return np.frombuffer(b, dtype=self.dtype)
 
     def __getitem__(self, key):
         start, stop, step = key.indices(self.length)
@@ -129,9 +142,6 @@ class LegacyBcolzArray:
         arr = np.empty(shape=(n,), dtype=self.dtype)
         if n == 0:
             return arr
-
-        if self.dtype.char == 'O':
-            raise ValueError('Unsupported dtype')
 
         lb = start // self.chunklen
         ub = stop // self.chunklen + 1
