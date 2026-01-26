@@ -83,6 +83,7 @@ def zip_data():
             md5path = zippath.with_suffix('.md5')
             for file in (zippath, md5path):
                 new_file = args.destination / file.name
+                new_file.parent.mkdir(exist_ok=True, parents=True)
                 shutil.move(file, new_file)
 
 
