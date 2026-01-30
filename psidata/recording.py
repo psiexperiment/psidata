@@ -1,6 +1,7 @@
 import logging
 log = logging.getLogger(__name__)
 
+from collections import Counter
 import functools
 from pathlib import Path
 import yaml
@@ -96,7 +97,7 @@ class Recording:
                     raise ValueError
         return expressions
 
-    def get_setting(self, setting_name, default=UNSET):
+    def get_setting(self, setting_name, default=UNSET, reconcile=None):
         '''
         Return value for setting
 
@@ -104,6 +105,15 @@ class Recording:
         ----------
         setting_name : string
             Setting to extract
+        default : value
+            Default value to return if key is missing.
+        reconcile : {None, 'first', 'last', 'frequency'}
+            A single value is returned by `get_setting`. Defines behavior if
+            the value is not unique across all trials:
+                * None raises a ValueError
+                * `'first'` returns the value for the first trial
+                * `'last'` returns the value for the last trial
+                * `'frequency'` returns the most common value
 
         Returns
         -------
@@ -126,8 +136,17 @@ class Recording:
             else:
                 raise
         if len(values) != 1:
-            raise ValueError(f'{setting_name} is not unique across all epochs.')
-        return values[0]
+            if reconcile is None:
+                raise ValueError(f'{setting_name} is not unique across all epochs.')
+            elif reconcile == 'first':
+                value = values[0]
+            elif reconcile == 'last':
+                value = values[-1]
+            elif reconcile == 'frequency':
+                value = Counter(values).most_common()[0][0]
+        else:
+            value = values[0]
+        return value
 
     def get_setting_default(self, setting_name, default):
         '''
