@@ -90,8 +90,19 @@ def default_find_paths(folder, glob_pattern):
 def process_files(glob_pattern, fn, folder, cb='tqdm', mode='process',
                   halt_on_error=False, logging_level=None,
                   expected_suffixes=None, n_jobs=1, dataset_manager='split',
-                  pathfinder=default_find_paths):
+                  pathfinder=default_find_paths, manager_kw=None):
+    '''
+    Parameters
+    ----------
+    ...
+    manager_kw : {None, dict}
+        If provided, will be passed to the dataset manager class at
+        initialization. Useful for modifying the default file template
+        generated.
+    '''
 
+    if manager_kw is None:
+        manager_kw = {}
     manager_class = DATASET_MANAGERS[dataset_manager]
 
     # Override callback if we are running in parallel otherwise it's messy
@@ -102,8 +113,9 @@ def process_files(glob_pattern, fn, folder, cb='tqdm', mode='process',
         nonlocal cb
         nonlocal mode
         nonlocal expected_suffixes
+        log.info('Processing %s', filename)
 
-        manager = manager_class(filename, cb=cb)
+        manager = manager_class(filename, cb=cb, **manager_kw)
         if mode == 'process' and manager.is_processed(expected_suffixes):
             pass
         elif mode == 'process' and not manager.is_processed(expected_suffixes):
@@ -189,14 +201,19 @@ class BaseDatasetManager:
         cb : str
             Callback to use for showing processing status. See `get_cb` for
             options.
-        file_template : {None, str}
-            If None, defaults to the filename stem
+        file_template : {None, str, callable}
+            If None, defaults to the filename stem. If callable, must be a
+            function that takes the full path and returns a string.
         '''
         self.path = Path(path)
         self.cb = cb
         if file_template is None:
-            file_template = f'{self.path.stem}'
-        self.file_template = file_template
+            self.file_template = f'{self.path.stem}'
+        elif callable(file_template):
+            self.file_template = file_template(path=self.path)
+        else:
+            self.file_template = file_template
+        log.info('Manager file template is %s', self.file_template)
 
     def create_cb(self, cb=None):
         if cb is None:
@@ -215,8 +232,8 @@ class BaseDatasetManager:
         if isinstance(suffixes, str):
             suffixes = [suffixes]
         for suffix in suffixes:
-            if not self.get_proc_filename(suffix).exists():
-                #log.info(f'Needs reprocessing since {suffix} is missing')
+            if not (file := self.get_proc_filename(suffix)).exists():
+                log.info('Is not processed because %s file is missing', file)
                 return False
         return True
 
