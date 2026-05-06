@@ -45,7 +45,34 @@ def parse_psi_filename(filename, include_ear, pattern):
         raise ValueError(f'Could not parse {filename.stem}')
 
 
-def load(cb, glob, filename_parser, data_path, include_dataset=False,
+def path_scanner(data_path):
+    def inner(glob_pattern):
+        nonlocal data_path
+        for filename in Path(data_path).glob(glob_pattern):
+            if '_exclude' in str(filename):
+                continue
+            if '.imaris_cache' in str(filename):
+                continue
+            yield filename
+    return inner
+
+
+def animal_scanner(data_path, animals):
+    data_path = Path(data_path)
+    def inner(glob_pattern):
+        nonlocal data_path
+        nonlocal animals
+        for animal in animals:
+            for path in (data_path / animal).glob(glob_pattern):
+                if '_exclude' in str(path):
+                    continue
+                if '.imaris_cache' in str(path):
+                    continue
+                yield path
+    return inner
+
+
+def load(cb, scanner, filename_parser=None, include_dataset=False,
          should_load_cb=None, info_as_cols=True):
     '''
     Parameters
@@ -66,16 +93,13 @@ def load(cb, glob, filename_parser, data_path, include_dataset=False,
         Callback that returns True if the file should be loaded. If a
         callback is not provided, all files found are loaded.
     '''
-    data_path = Path(data_path)
+    if filename_parser is None:
+        filename_parser = parse_psi_filename
     if should_load_cb is None:
         should_load_cb = lambda x: True
     result = []
-    for filename in data_path.glob(glob):
+    for filename in scanner:
         try:
-            if '_exclude' in str(filename):
-                continue
-            if '.imaris_cache' in str(filename):
-                continue
             if not should_load_cb(filename):
                 continue
             data = cb(filename)
