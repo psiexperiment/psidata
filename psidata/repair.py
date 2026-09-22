@@ -43,6 +43,7 @@ log = logging.getLogger(__name__)
 
 import argparse
 import datetime as dt
+from fnmatch import fnmatch
 import json
 import os
 from pathlib import Path
@@ -187,9 +188,15 @@ def find_partial_prefix(array, start, stop, min_prefix=DEFAULT_MIN_PREFIX,
 
 
 def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
-                   quick=False, min_prefix=DEFAULT_MIN_PREFIX):
+                   quick=False, min_prefix=DEFAULT_MIN_PREFIX, ignore=()):
     '''
     Return a report of the fill runs in each array of a recording.
+
+    Arrays whose name matches one of the `ignore` patterns are listed but
+    not scanned, and never make a recording suspect. Use this for channels
+    that legitimately hold a constant value -- a counter or quadrature input
+    resting at zero looks exactly like a fill block, and a near-constant
+    channel such as temperature can too.
     '''
     store, names = open_arrays(path)
     report = {'recording': str(path), 'arrays': {}, 'suspect': False}
@@ -201,10 +208,11 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
                 'fs': fs,
                 'length': array.shape[-1],
                 'n_channels': int(np.prod(array.shape[:-1])) if array.ndim > 1 else 1,
+                'ignored': any(fnmatch(name, p) for p in ignore),
                 'fill_runs': [],
             }
             report['arrays'][name] = info
-            if quick:
+            if quick or info['ignored']:
                 continue
             for start, stop in iter_fill_runs(array, min_samples, block):
                 prefix = find_partial_prefix(array, start, stop, min_prefix)
@@ -225,6 +233,8 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
     # the same length.
     by_fs = {}
     for name, info in report['arrays'].items():
+        if info['ignored']:
+            continue
         by_fs.setdefault(info['fs'], set()).add(info['length'])
     report['length_mismatch'] = sorted(fs for fs, lengths in by_fs.items()
                                        if fs and len(lengths) > 1)
@@ -233,11 +243,11 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
     return report
 
 
-def scan_fill_blocks(path, min_samples=DEFAULT_MIN_SAMPLES):
+def scan_fill_blocks(path, min_samples=DEFAULT_MIN_SAMPLES, ignore=()):
     '''
     Return {input name: [(start, stop), ...]} found by scanning the data.
     '''
-    report = scan_recording(path, min_samples=min_samples)
+    report = scan_recording(path, min_samples=min_samples, ignore=ignore)
     blocks = {}
     for name, info in report['arrays'].items():
         ranges = [(r['damaged_start'], r['stop']) for r in info['fill_runs']]
@@ -382,7 +392,8 @@ def print_scan_report(report, verbose):
         fs = info['fs']
         duration = f'{info["length"] / fs:.1f} s' if fs else 'unknown duration'
         if info['fill_runs'] or verbose:
-            print(f'  {name}.zarr: {info["length"]} samples ({duration})')
+            ignored = ' -- ignored' if info['ignored'] else ''
+            print(f'  {name}.zarr: {info["length"]} samples ({duration}){ignored}')
         for run in info['fill_runs']:
             where = '' if run['seconds'] is None else f' at t={run["seconds"]:.3f} s'
             extra = '' if not run['partial_prefix'] else \
@@ -421,6 +432,12 @@ def scan_main(argv=None):
                         '(default: %(default)s)')
     parser.add_argument('--block', type=int, default=DEFAULT_BLOCK,
                         help='Samples to read at a time (default: %(default)s)')
+    parser.add_argument('--ignore', action='append', default=[],
+                        metavar='PATTERN',
+                        help='Array to leave unscanned, e.g. a counter or '
+                        'quadrature channel that rests at zero, or a '
+                        'near-constant one such as temperature. Accepts '
+                        'wildcards and can be repeated.')
     parser.add_argument('--quick', action='store_true',
                         help='Only compare array lengths; do not read samples')
     parser.add_argument('--verbose', action='store_true',
@@ -433,7 +450,7 @@ def scan_main(argv=None):
     for path in iter_recordings(args.paths, args.recursive):
         try:
             report = scan_recording(path, args.min_samples, args.block,
-                                    args.quick, args.min_prefix)
+                                    args.quick, args.min_prefix, args.ignore)
         except Exception as e:
             print(f'{path}\n  ERROR: {e}')
             reports.append({'recording': str(path), 'error': str(e),
@@ -464,6 +481,13 @@ def repair_main(argv=None):
                         help='Find the ranges by scanning the data for fill '
                         'blocks instead of reading them from the log. Needed '
                         'for recordings made before NIDAQ_DATA_GAP logging.')
+    parser.add_argument('--ignore', action='append', default=[],
+                        metavar='PATTERN',
+                        help='Array to leave unscanned when --scan is used, '
+                        'e.g. a counter or '
+                        'quadrature channel that rests at zero, or a '
+                        'near-constant one such as temperature. Accepts '
+                        'wildcards and can be repeated.')
     parser.add_argument('--temp-dir', type=Path,
                         help='Where to stage the repaired arrays (default: '
                         'the system temp directory; needs room for the '
@@ -496,7 +520,7 @@ def repair_main(argv=None):
 
     if args.scan:
         print(f'Scanning {recording} for fill blocks')
-        blocks = scan_fill_blocks(recording)
+        blocks = scan_fill_blocks(recording, ignore=args.ignore)
         source = 'data scan'
     else:
         blocks, retries = find_fill_blocks(log_text)

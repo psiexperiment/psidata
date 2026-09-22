@@ -160,3 +160,38 @@ def test_repair_without_log(recording):
     assert repair_main([str(stripped), '--scan', '--apply']) == 0
     for name, data in repaired_arrays(stripped).items():
         np.testing.assert_array_equal(data, truth[name])
+
+
+def test_ignore_excludes_array(recording):
+    '''
+    A counter or quadrature channel resting at zero looks exactly like a fill
+    block, so it has to be possible to leave it out.
+    '''
+    path, truth = recording
+    report = scan_recording(path, min_samples=100, ignore=['mic'])
+    assert report['arrays']['mic']['ignored']
+    assert report['arrays']['mic']['fill_runs'] == []
+    assert report['arrays']['eeg']['fill_runs']      # still scanned
+
+    # An ignored array is also left out of the length cross-check, so on its
+    # own it cannot make a recording suspect.
+    only_mic = scan_recording(path, min_samples=100, ignore=['eeg'])
+    assert only_mic['suspect']       # mic really is damaged here
+    both = scan_recording(path, min_samples=100, ignore=['eeg', 'mic'])
+    assert not both['suspect']
+    assert both['length_mismatch'] == []
+
+
+def test_ignore_accepts_wildcards(recording):
+    path, truth = recording
+    report = scan_recording(path, min_samples=100, ignore=['m*'])
+    assert report['arrays']['mic']['ignored']
+    assert not report['arrays']['eeg']['ignored']
+
+
+def test_repair_scan_respects_ignore(recording):
+    path, truth = recording
+    assert repair_main([str(path), '--scan', '--apply', '--ignore', 'mic']) == 0
+    arrays = repaired_arrays(path)
+    np.testing.assert_array_equal(arrays['eeg'], truth['eeg'])
+    assert arrays['mic'].shape[-1] == truth['mic'].shape[-1] + BLOCK
