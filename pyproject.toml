@@ -32,6 +32,8 @@ zarr-backend = ["zarr"]
 psidata-zip-data = "psidata.postprocess:zip_data"
 psidata-split-data = "psidata.postprocess:split_data"
 psidata-merge-pdf = "psidata.postprocess:merge_pdf"
+psidata-scan-recording = "psidata.repair:scan_main"
+psidata-repair-recording = "psidata.repair:repair_main"
 
 [build-system]
 requires = ["setuptools>=61.2", "wheel", "setuptools_scm[toml]>=3.4.3"]
