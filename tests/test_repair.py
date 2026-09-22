@@ -14,7 +14,8 @@ from psidata.repair import find_fill_blocks, repair_main, scan_recording
 BLOCK = 1000
 
 
-def damage(root, name, n_blocks, bad_blocks, partial=0, seed=0):
+def damage(root, name, n_blocks, bad_blocks, partial=0, seed=0,
+           engine='NI_misc', fs=8000.0):
     '''
     Write a recording the way psi did, reproducing the append-retry bug on the
     blocks in `bad_blocks`: the resize from the failed attempt is committed,
@@ -25,7 +26,7 @@ def damage(root, name, n_blocks, bad_blocks, partial=0, seed=0):
     rng = np.random.default_rng(seed)
     array = zarr.create_array(store=str(root / f'{name}.zarr'), shape=(1, 0),
                               chunks=(1, 4096), dtype='f8',
-                              attributes={'fs': 100.0})
+                              attributes={'fs': fs, 'engine': engine})
     signal = np.cumsum(rng.normal(size=(1, n_blocks * BLOCK)), axis=-1) + 5
     log = []
     for i in range(n_blocks):
@@ -195,3 +196,63 @@ def test_repair_scan_respects_ignore(recording):
     arrays = repaired_arrays(path)
     np.testing.assert_array_equal(arrays['eeg'], truth['eeg'])
     assert arrays['mic'].shape[-1] == truth['mic'].shape[-1] + BLOCK
+
+
+def zip_arrays(tmp_path, name, builder):
+    root = tmp_path / name
+    root.mkdir()
+    builder(root)
+    path = tmp_path / f'{name}.zip'
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for dirpath, dirnames, filenames in os.walk(root):
+            rel = Path(dirpath).relative_to(root).as_posix()
+            for filename in filenames:
+                arcname = filename if rel == '.' else f'{rel}/{filename}'
+                zf.write(Path(dirpath) / filename, arcname)
+    return path
+
+
+def test_length_check_only_compares_one_engine(tmp_path):
+    '''
+    Channels on separate engines are started independently and routinely end
+    up different lengths (e.g. a probe and an elicitor microphone, or a
+    temperature channel polled by its own task). Only arrays from one engine
+    at one rate should be compared.
+    '''
+    def build(root):
+        for name, engine, n in [('probe', 'NI_a', 20000), ('elicitor', 'NI_b', 22000),
+                                ('temperature', 'NI_c', 300)]:
+            array = zarr.create_array(store=str(root / f'{name}.zarr'), shape=(1, 0),
+                                      chunks=(1, 4096), dtype='f8',
+                                      attributes={'fs': 8000.0, 'engine': engine})
+            array.append(np.random.default_rng(0).normal(size=(1, n)), axis=1)
+
+    report = scan_recording(zip_arrays(tmp_path, 'multi', build), min_samples=100)
+    assert report['length_mismatch'] == []
+    assert not report['suspect']
+
+
+def test_long_fill_run_is_not_damage(tmp_path):
+    '''
+    A quadrature or counter channel resting at zero holds the fill value for
+    far longer than any single append, so it is reported but not called
+    damage.
+    '''
+    def build(root):
+        array = zarr.create_array(store=str(root / 'turntable_angle.zarr'),
+                                  shape=(1, 0), chunks=(1, 4096), dtype='f8',
+                                  attributes={'fs': 8000.0, 'engine': 'NI_a'})
+        data = np.random.default_rng(0).normal(size=(1, 60000))
+        data[:, 20000:44000] = 0.0       # 3 s at rest
+        array.append(data, axis=1)
+
+    report = scan_recording(zip_arrays(tmp_path, 'turntable', build), min_samples=100)
+    run, = report['arrays']['turntable_angle']['fill_runs']
+    assert run['too_long']
+    assert run['duration'] == pytest.approx(3.0)
+    assert not report['suspect']
+
+    # The same run inside the allowed length is damage again.
+    strict = scan_recording(zip_arrays(tmp_path, 'turntable2', build),
+                            min_samples=100, max_seconds=5.0)
+    assert strict['suspect']

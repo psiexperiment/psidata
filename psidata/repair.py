@@ -81,6 +81,12 @@ JUMP_CONTEXT = 1000
 
 DEFAULT_BLOCK = 4_000_000
 
+# A fill block is a single failed append, i.e. one monitor period of data --
+# 0.125 s for analog input, and at most ~1 s for any psi engine. A much longer
+# run of the fill value is something else, typically a counter or quadrature
+# channel resting at zero.
+MAX_RUN_SECONDS = 2.0
+
 
 def find_fill_blocks(log_text):
     '''
@@ -188,7 +194,8 @@ def find_partial_prefix(array, start, stop, min_prefix=DEFAULT_MIN_PREFIX,
 
 
 def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
-                   quick=False, min_prefix=DEFAULT_MIN_PREFIX, ignore=()):
+                   quick=False, min_prefix=DEFAULT_MIN_PREFIX, ignore=(),
+                   max_seconds=MAX_RUN_SECONDS):
     '''
     Return a report of the fill runs in each array of a recording.
 
@@ -197,6 +204,9 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
     that legitimately hold a constant value -- a counter or quadrature input
     resting at zero looks exactly like a fill block, and a near-constant
     channel such as temperature can too.
+
+    Runs longer than `max_seconds` are reported but do not make a recording
+    suspect, since no single append is that long.
     '''
     store, names = open_arrays(path)
     report = {'recording': str(path), 'arrays': {}, 'suspect': False}
@@ -208,6 +218,7 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
                 'fs': fs,
                 'length': array.shape[-1],
                 'n_channels': int(np.prod(array.shape[:-1])) if array.ndim > 1 else 1,
+                'engine': _engine_ref(array),
                 'ignored': any(fnmatch(name, p) for p in ignore),
                 'fill_runs': [],
             }
@@ -216,6 +227,8 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
                 continue
             for start, stop in iter_fill_runs(array, min_samples, block):
                 prefix = find_partial_prefix(array, start, stop, min_prefix)
+                duration = None if not fs else (stop - start + prefix) / fs
+                too_long = duration is not None and duration > max_seconds
                 info['fill_runs'].append({
                     'start': start,
                     'stop': stop,
@@ -223,24 +236,44 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
                     'partial_prefix': prefix,
                     'damaged_start': start - prefix,
                     'seconds': None if not fs else (start - prefix) / fs,
-                    'duration': None if not fs else (stop - start + prefix) / fs,
+                    'duration': duration,
+                    'too_long': too_long,
                 })
-                report['suspect'] = True
+                if not too_long:
+                    report['suspect'] = True
     finally:
         store.close()
 
-    # Arrays sharing a sample rate come off the same clock, so they should be
-    # the same length.
-    by_fs = {}
+    # Arrays acquired by one engine at one sample rate come off the same task,
+    # so they should be the same length. Arrays on different engines are
+    # started independently and routinely differ by a fraction of a second, so
+    # comparing those would be meaningless.
+    groups = {}
     for name, info in report['arrays'].items():
-        if info['ignored']:
+        if info['ignored'] or not info['fs'] or info['engine'] is None:
             continue
-        by_fs.setdefault(info['fs'], set()).add(info['length'])
-    report['length_mismatch'] = sorted(fs for fs, lengths in by_fs.items()
-                                       if fs and len(lengths) > 1)
+        groups.setdefault((info['engine'], info['fs']), {})[name] = info['length']
+    report['length_mismatch'] = [
+        {'engine': engine, 'fs': fs, 'lengths': lengths}
+        for (engine, fs), lengths in groups.items()
+        if len(set(lengths.values())) > 1
+    ]
     if report['length_mismatch']:
         report['suspect'] = True
     return report
+
+
+def _engine_ref(array):
+    '''
+    Return something identifying the engine an array was acquired by, or None.
+    psi serializes the engine as a nested object the first time it appears and
+    as an "__obj__::<id>" reference after that; either way the value is stable
+    within one recording.
+    '''
+    engine = array.attrs.get('engine')
+    if isinstance(engine, dict):
+        return engine.get('__id__', engine.get('name'))
+    return engine
 
 
 def scan_fill_blocks(path, min_samples=DEFAULT_MIN_SAMPLES, ignore=()):
@@ -250,7 +283,8 @@ def scan_fill_blocks(path, min_samples=DEFAULT_MIN_SAMPLES, ignore=()):
     report = scan_recording(path, min_samples=min_samples, ignore=ignore)
     blocks = {}
     for name, info in report['arrays'].items():
-        ranges = [(r['damaged_start'], r['stop']) for r in info['fill_runs']]
+        ranges = [(r['damaged_start'], r['stop']) for r in info['fill_runs']
+                  if not r['too_long']]
         if ranges:
             blocks[name] = ranges
     return blocks
@@ -395,15 +429,19 @@ def print_scan_report(report, verbose):
             ignored = ' -- ignored' if info['ignored'] else ''
             print(f'  {name}.zarr: {info["length"]} samples ({duration}){ignored}')
         for run in info['fill_runs']:
+            if run['too_long'] and not verbose:
+                continue
             where = '' if run['seconds'] is None else f' at t={run["seconds"]:.3f} s'
             extra = '' if not run['partial_prefix'] else \
                 f', plus {run["partial_prefix"]} partly written samples before it'
+            note = '' if not run['too_long'] else \
+                f' -- {run["duration"]:.1f} s is too long to be one append, so ' \
+                f'this is a channel holding a constant value, not damage'
             print(f'    fill run [{run["damaged_start"]}, {run["stop"]}): '
-                  f'{run["n_samples"]} fill samples{where}{extra}')
-    for fs in report['length_mismatch']:
-        lengths = {name: info['length'] for name, info in report['arrays'].items()
-                   if info['fs'] == fs}
-        print(f'  arrays at {fs} Hz have different lengths: {lengths}')
+                  f'{run["n_samples"]} fill samples{where}{extra}{note}')
+    for mismatch in report['length_mismatch']:
+        print(f'  arrays on one engine at {mismatch["fs"]} Hz have different '
+              f'lengths: {mismatch["lengths"]}')
 
 
 def iter_recordings(paths, recursive):
@@ -438,6 +476,10 @@ def scan_main(argv=None):
                         'quadrature channel that rests at zero, or a '
                         'near-constant one such as temperature. Accepts '
                         'wildcards and can be repeated.')
+    parser.add_argument('--max-seconds', type=float, default=MAX_RUN_SECONDS,
+                        help='Fill runs longer than this are reported but not '
+                        'treated as damage, since no single append is that '
+                        'long (default: %(default)s)')
     parser.add_argument('--quick', action='store_true',
                         help='Only compare array lengths; do not read samples')
     parser.add_argument('--verbose', action='store_true',
@@ -450,7 +492,8 @@ def scan_main(argv=None):
     for path in iter_recordings(args.paths, args.recursive):
         try:
             report = scan_recording(path, args.min_samples, args.block,
-                                    args.quick, args.min_prefix, args.ignore)
+                                    args.quick, args.min_prefix, args.ignore,
+                                    args.max_seconds)
         except Exception as e:
             print(f'{path}\n  ERROR: {e}')
             reports.append({'recording': str(path), 'error': str(e),
