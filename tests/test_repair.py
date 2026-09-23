@@ -256,3 +256,36 @@ def test_long_fill_run_is_not_damage(tmp_path):
     strict = scan_recording(zip_arrays(tmp_path, 'turntable2', build),
                             min_samples=100, max_seconds=5.0)
     assert strict['suspect']
+
+
+def test_length_mismatch_alone_is_not_damage(tmp_path):
+    '''
+    Two inputs from one channel can stop an append apart at the end of a
+    recording, so a length difference is reported but is not damage by itself.
+    '''
+    def build(root):
+        for name, n in [('probe_microphone', 20000), ('elicitor_microphone', 32500)]:
+            array = zarr.create_array(store=str(root / f'{name}.zarr'), shape=(1, 0),
+                                      chunks=(1, 4096), dtype='f8',
+                                      attributes={'fs': 100000.0, 'engine': 'NI_a'})
+            array.append(np.random.default_rng(0).normal(size=(1, n)), axis=1)
+
+    report = scan_recording(zip_arrays(tmp_path, 'memr', build), min_samples=100)
+    assert report['length_mismatch']        # still reported
+    assert not report['suspect']            # but not called damage
+
+
+def test_recording_without_arrays(tmp_path):
+    '''
+    A calibration-only recording holds no zarr arrays. zarr's ZipStore opens
+    lazily and raises when closed unread, which used to surface as a scan
+    error.
+    '''
+    path = tmp_path / 'calibration_only.zip'
+    with zipfile.ZipFile(path, 'w') as zf:
+        zf.writestr('calibration.csv', 'a,b\n1,2\n')
+        zf.writestr('experiment_log.txt', 'nothing to see')
+
+    report = scan_recording(path)
+    assert report['arrays'] == {}
+    assert not report['suspect']

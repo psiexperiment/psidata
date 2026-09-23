@@ -134,6 +134,11 @@ def open_arrays(path):
     with zipfile.ZipFile(path) as zf:
         names = sorted({n.split('.zarr/')[0] for n in zf.namelist()
                         if n.endswith(('.zarr/zarr.json', '.zarr/.zarray'))})
+    if not names:
+        # zarr's ZipStore opens lazily, and closing one that was never read
+        # raises AttributeError, so don't create it for a recording that holds
+        # no arrays at all (a calibration-only recording, say).
+        return None, []
     return ZipStore(path, mode='r'), names
 
 
@@ -242,12 +247,16 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
                 if not too_long:
                     report['suspect'] = True
     finally:
-        store.close()
+        if store is not None:
+            store.close()
 
     # Arrays acquired by one engine at one sample rate come off the same task,
-    # so they should be the same length. Arrays on different engines are
-    # started independently and routinely differ by a fraction of a second, so
-    # comparing those would be meaningless.
+    # so a difference in length is worth reporting. It is only a hint, never
+    # proof: two inputs from one channel can stop an append apart at the end of
+    # a recording (memr recordings show a steady 12500-sample difference
+    # between the probe and elicitor microphones, with no fill block anywhere),
+    # so this does not on its own make a recording damaged. Arrays on different
+    # engines are started independently and are not comparable at all.
     groups = {}
     for name, info in report['arrays'].items():
         if info['ignored'] or not info['fs'] or info['engine'] is None:
@@ -258,8 +267,6 @@ def scan_recording(path, min_samples=DEFAULT_MIN_SAMPLES, block=DEFAULT_BLOCK,
         for (engine, fs), lengths in groups.items()
         if len(set(lengths.values())) > 1
     ]
-    if report['length_mismatch']:
-        report['suspect'] = True
     return report
 
 
@@ -440,8 +447,9 @@ def print_scan_report(report, verbose):
             print(f'    fill run [{run["damaged_start"]}, {run["stop"]}): '
                   f'{run["n_samples"]} fill samples{where}{extra}{note}')
     for mismatch in report['length_mismatch']:
-        print(f'  arrays on one engine at {mismatch["fs"]} Hz have different '
-              f'lengths: {mismatch["lengths"]}')
+        print(f'  note: arrays on one engine at {mismatch["fs"]} Hz have '
+              f'different lengths: {mismatch["lengths"]}. Inputs can stop an '
+              f'append apart, so this is only damage if a fill run says so.')
 
 
 def iter_recordings(paths, recursive):
