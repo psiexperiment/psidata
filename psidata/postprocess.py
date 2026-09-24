@@ -45,7 +45,7 @@ def split_data():
     directory that parallels the experiment data.
     '''
     import argparse
-    parser = argparse.ArgumentParser('psi-split-data')
+    parser = argparse.ArgumentParser('psidata-split-data')
     parser.add_argument('path', type=Path)
     parser.add_argument('dest', type=Path)
     parser.add_argument('pattern', type=str)
@@ -67,7 +67,7 @@ def zip_data():
     as BTRFS or ZFS.
     '''
     import argparse
-    parser = argparse.ArgumentParser('cfts-zip-data')
+    parser = argparse.ArgumentParser('psidata-zip-data')
     parser.add_argument('path', type=Path)
     parser.add_argument('-d', '--destination', type=Path)
     args = parser.parse_args()
@@ -146,7 +146,7 @@ def merge_pdf():
     from pypdf.errors import PdfReadError
     import argparse
 
-    parser = argparse.ArgumentParser('cfts-merge-pdf')
+    parser = argparse.ArgumentParser('psidata-merge-pdf')
     parser.add_argument('path', type=Path)
     parser.add_argument('pattern', type=str)
     parser.add_argument('output', type=Path)
