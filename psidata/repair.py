@@ -508,15 +508,50 @@ def summarize_report(rows):
     return 1 if damaged else 0
 
 
+DATE_RE = re.compile(r'(?<!\d)(\d{4})(\d{2})(\d{2})-\d{6}')
+
+
+def recording_date(path):
+    '''
+    Return the date a recording was made, read from psi's
+    "YYYYMMDD-HHMMSS <name>" naming, or from the file's modification time when
+    the name carries no timestamp.
+    '''
+    match = DATE_RE.search(path.name) or DATE_RE.search(str(path))
+    if match:
+        try:
+            return dt.date(*(int(g) for g in match.groups()))
+        except ValueError:
+            pass
+    return dt.date.fromtimestamp(path.stat().st_mtime)
+
+
+def parse_date(text):
+    for fmt in ('%Y-%m-%d', '%Y%m%d'):
+        try:
+            return dt.datetime.strptime(text, fmt).date()
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError(f'not a date: {text!r} (use YYYY-MM-DD)')
+
+
 def iter_recordings(paths, recursive):
     for path in paths:
         if path.is_file() or (path / 'experiment_log.txt').exists() \
                 or any(path.glob('*.zarr')):
             yield path
         elif recursive:
-            yield from sorted(p for p in path.rglob('*.zip'))
+            yield from sorted(p for p in path.rglob('*.zip')
+                              if not _is_partial(p))
         else:
-            yield from sorted(p for p in path.glob('*.zip'))
+            yield from sorted(p for p in path.glob('*.zip')
+                              if not _is_partial(p))
+
+
+def _is_partial(path):
+    # A repair in progress writes "<name>.repairing.zip", which has no
+    # central directory yet and is not a recording in any case.
+    return path.name.endswith('.repairing.zip')
 
 
 def scan_main(argv=None):
@@ -531,6 +566,21 @@ def scan_main(argv=None):
                         'channels with something wrong.')
     parser.add_argument('--recursive', action='store_true',
                         help='Search directories for recordings recursively')
+    parser.add_argument('--exclude', action='append', default=[],
+                        metavar='PATTERN',
+                        help='Skip recordings whose file name matches this '
+                        'pattern, e.g. "* - Copy.zip". Accepts wildcards and '
+                        'can be repeated. (Use --ignore to leave out a '
+                        'channel rather than a recording.)')
+    parser.add_argument('--skip-originals', action='store_true',
+                        help='Skip the "<name> (original).zip" backups left by '
+                        'psidata-repair-recording. Those hold the damage by '
+                        'definition, so they would be reported forever.')
+    parser.add_argument('--since', type=parse_date, metavar='YYYY-MM-DD',
+                        help='Skip recordings made before this date, taken '
+                        'from the recording name (or its modification time if '
+                        'the name has no timestamp). Use this to re-scan only '
+                        'what is new.')
     parser.add_argument('--min-samples', type=int, default=DEFAULT_MIN_SAMPLES,
                         help='Shortest fill run to report (default: %(default)s)')
     parser.add_argument('--min-prefix', type=int, default=DEFAULT_MIN_PREFIX,
@@ -562,8 +612,20 @@ def scan_main(argv=None):
         parser.error('give at least one recording to scan, or --summarize a '
                      'report written earlier')
 
+    exclude = list(args.exclude)
+    if args.skip_originals:
+        exclude.append('*(original).zip')
+
     reports = []
+    skipped = 0
+    excluded = 0
     for path in iter_recordings(args.paths, args.recursive):
+        if any(fnmatch(path.name, pattern) for pattern in exclude):
+            excluded += 1
+            continue
+        if args.since is not None and recording_date(path) < args.since:
+            skipped += 1
+            continue
         try:
             report = scan_recording(path, args.min_samples, args.block,
                                     args.quick, args.min_prefix, args.ignore,
@@ -580,6 +642,10 @@ def scan_main(argv=None):
     if args.json:
         args.json.write_text(json.dumps(reports, indent=2))
     suspect = [r for r in reports if r['suspect']]
+    if excluded:
+        print(f'\nSkipped {excluded} excluded recordings.')
+    if skipped:
+        print(f'\nSkipped {skipped} recordings made before {args.since}.')
     print(f'\n{len(suspect)} of {len(reports)} recordings look damaged.')
     if suspect:
         print('Repair them with psidata-repair-recording.')

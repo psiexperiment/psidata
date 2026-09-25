@@ -1,5 +1,7 @@
+import datetime as dt
 import json
 import os
+import shutil
 from pathlib import Path
 import zipfile
 
@@ -337,3 +339,94 @@ def test_summarize_separates_notes_and_errors(tmp_path, capsys):
 def test_summarize_requires_a_report_or_paths():
     with pytest.raises(SystemExit):
         scan_main([])
+
+
+def dated_recording(tmp_path, stamp):
+    name = f'{stamp} test left abr_io'
+
+    def build(root):
+        array = zarr.create_array(store=str(root / 'eeg.zarr'), shape=(1, 0),
+                                  chunks=(1, 4096), dtype='f8',
+                                  attributes={'fs': 8000.0, 'engine': 'NI_a'})
+        array.append(np.random.default_rng(0).normal(size=(1, 5000)), axis=1)
+
+    return zip_arrays(tmp_path, name, build)
+
+
+def test_since_skips_older_recordings(tmp_path, capsys):
+    old = dated_recording(tmp_path, '20260901-101500')
+    new = dated_recording(tmp_path, '20260921-114500')
+
+    assert scan_main([str(old), str(new), '--since', '2026-09-15',
+                      '--verbose']) == 0
+    out = capsys.readouterr().out
+    assert new.name in out
+    assert old.name not in out
+    assert 'Skipped 1 recordings made before 2026-09-15' in out
+    assert '0 of 1 recordings look damaged' in out
+
+
+def test_since_accepts_compact_date(tmp_path, capsys):
+    old = dated_recording(tmp_path, '20260901-101500')
+    assert scan_main([str(old), '--since', '20260915']) == 0
+    assert '0 of 0 recordings look damaged' in capsys.readouterr().out
+
+
+def test_recording_date_falls_back_to_mtime(tmp_path):
+    from psidata.repair import recording_date
+    dated = tmp_path / '20260921-114500 test left abr_io.zip'
+    dated.write_bytes(b'')
+    assert recording_date(dated) == dt.date(2026, 9, 21)
+
+    undated = tmp_path / 'calibration.zip'
+    undated.write_bytes(b'')
+    os.utime(undated, (0, dt.datetime(2026, 5, 4, 12, 0).timestamp()))
+    assert recording_date(undated) == dt.date(2026, 5, 4)
+
+
+def test_skip_originals(tmp_path, capsys):
+    '''
+    A repair keeps the damaged recording as "<name> (original).zip", which
+    would otherwise be reported as damaged on every later scan.
+    '''
+    repaired = zip_arrays(tmp_path, '20260921-114500 test left abr_io',
+                          lambda r: damage(r, 'eeg', 20, {5}))
+    backup = repaired.with_name(f'{repaired.stem} (original).zip')
+    shutil.copy(repaired, backup)
+
+    assert scan_main([str(repaired), str(backup), '--min-samples', '100']) == 1
+    out = capsys.readouterr().out
+    assert '2 of 2 recordings look damaged' in out
+
+    assert scan_main([str(repaired), str(backup), '--min-samples', '100',
+                      '--skip-originals']) == 1
+    out = capsys.readouterr().out
+    assert backup.name not in out
+    assert 'Skipped 1 excluded recordings' in out
+    assert '1 of 1 recordings look damaged' in out
+
+
+def test_exclude_pattern(tmp_path, capsys):
+    kept = dated_recording(tmp_path, '20260921-114500')
+    copy = kept.with_name(f'{kept.stem} - Copy.zip')
+    shutil.copy(kept, copy)
+
+    assert scan_main([str(kept), str(copy), '--exclude', '* - Copy.zip',
+                      '--verbose']) == 0
+    out = capsys.readouterr().out
+    assert copy.name not in out
+    assert 'Skipped 1 excluded recordings' in out
+
+
+def test_partial_repair_file_is_skipped(tmp_path, capsys):
+    '''
+    A repair in progress writes "<name>.repairing.zip", which cannot be read
+    as a recording and would otherwise be reported as a scan error.
+    '''
+    dated_recording(tmp_path, '20260921-114500')
+    (tmp_path / 'half written.repairing.zip').write_bytes(b'not a zip yet')
+
+    assert scan_main([str(tmp_path), '--verbose']) == 0
+    out = capsys.readouterr().out
+    assert 'repairing.zip' not in out
+    assert '0 of 1 recordings look damaged' in out
