@@ -357,19 +357,22 @@ def test_since_skips_older_recordings(tmp_path, capsys):
     old = dated_recording(tmp_path, '20260901-101500')
     new = dated_recording(tmp_path, '20260921-114500')
 
-    assert scan_main([str(old), str(new), '--since', '2026-09-15',
+    assert scan_main([str(old), str(new), '--since', '20260915',
                       '--verbose']) == 0
     out = capsys.readouterr().out
     assert new.name in out
     assert old.name not in out
-    assert 'Skipped 1 recordings made before 2026-09-15' in out
+    assert 'Skipped 1 recordings made before 20260915' in out
     assert '0 of 1 recordings look damaged' in out
 
 
-def test_since_accepts_compact_date(tmp_path, capsys):
+@pytest.mark.parametrize('text', ['2026-09-15', '20260915-114500', '15092026',
+                                  'yesterday'])
+def test_since_requires_a_compact_date(tmp_path, text):
+    # Dates are written the way a recording name writes them, YYYYMMDD.
     old = dated_recording(tmp_path, '20260901-101500')
-    assert scan_main([str(old), '--since', '20260915']) == 0
-    assert '0 of 0 recordings look damaged' in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        scan_main([str(old), '--since', text])
 
 
 def test_recording_date_falls_back_to_mtime(tmp_path):

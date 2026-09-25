@@ -527,12 +527,11 @@ def recording_date(path):
 
 
 def parse_date(text):
-    for fmt in ('%Y-%m-%d', '%Y%m%d'):
-        try:
-            return dt.datetime.strptime(text, fmt).date()
-        except ValueError:
-            pass
-    raise argparse.ArgumentTypeError(f'not a date: {text!r} (use YYYY-MM-DD)')
+    try:
+        return dt.datetime.strptime(text, '%Y%m%d').date()
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f'not a date: {text!r} (use YYYYMMDD, as in a recording name)')
 
 
 def iter_recordings(paths, recursive):
@@ -576,7 +575,7 @@ def scan_main(argv=None):
                         help='Skip the "<name> (original).zip" backups left by '
                         'psidata-repair-recording. Those hold the damage by '
                         'definition, so they would be reported forever.')
-    parser.add_argument('--since', type=parse_date, metavar='YYYY-MM-DD',
+    parser.add_argument('--since', type=parse_date, metavar='YYYYMMDD',
                         help='Skip recordings made before this date, taken '
                         'from the recording name (or its modification time if '
                         'the name has no timestamp). Use this to re-scan only '
@@ -645,7 +644,8 @@ def scan_main(argv=None):
     if excluded:
         print(f'\nSkipped {excluded} excluded recordings.')
     if skipped:
-        print(f'\nSkipped {skipped} recordings made before {args.since}.')
+        print(f'\nSkipped {skipped} recordings made before '
+              f'{args.since:%Y%m%d}.')
     print(f'\n{len(suspect)} of {len(reports)} recordings look damaged.')
     if suspect:
         print('Repair them with psidata-repair-recording.')
