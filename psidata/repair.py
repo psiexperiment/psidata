@@ -29,7 +29,9 @@ Commands
 --------
 psidata-scan-recording
     Report recordings that look damaged. Takes recordings or directories of
-    them, and `--recursive` to walk a whole data tree.
+    them, and `--recursive` to walk a whole data tree. `--json` saves the full
+    report, and `--summarize` reads one back, printing only the recordings and
+    channels with something wrong.
 
 psidata-repair-recording
     Repair one recording. Reports only, unless `--apply` is passed, which keeps
@@ -42,6 +44,7 @@ import logging
 log = logging.getLogger(__name__)
 
 import argparse
+import collections
 import datetime as dt
 from fnmatch import fnmatch
 import json
@@ -452,6 +455,59 @@ def print_scan_report(report, verbose):
               f'append apart, so this is only damage if a fill run says so.')
 
 
+def summarize_report(rows):
+    '''
+    Print only what needs attention from a report written by --json: each
+    damaged recording with the channels and ranges to repair, and any
+    recording that could not be read. Clean recordings, clean channels and
+    notes are left out.
+    '''
+    def shifts(report):
+        return {name: [r for r in info['fill_runs'] if not r['too_long']]
+                for name, info in sorted(report['arrays'].items())
+                if any(not r['too_long'] for r in info['fill_runs'])}
+
+    suspect = [r for r in rows if r.get('suspect')]
+    errors = [r for r in rows if 'error' in r]
+    damaged = [r for r in suspect if shifts(r)]
+    # A report written before a length difference stopped counting as damage
+    # can flag a recording with no fill run at all.
+    no_shifts = [r for r in suspect if not shifts(r)]
+    channels = collections.Counter()
+
+    for report in sorted(damaged, key=lambda r: r['recording']):
+        print(report['recording'])
+        for name, runs in shifts(report).items():
+            channels[name] += len(runs)
+            for run in runs:
+                where = 'unknown time' if run['seconds'] is None \
+                    else f't={run["seconds"]:.3f} s'
+                span = '' if run['duration'] is None \
+                    else f', {run["duration"] * 1000:.1f} ms'
+                print(f'    {name}: {run["n_samples"]} samples{span} at {where} '
+                      f'-- remove [{run["damaged_start"]}, {run["stop"]})')
+
+    if no_shifts:
+        print()
+        print('Flagged with no fill run, so only by a length difference, which '
+              'is not damage on its own:')
+        for report in sorted(no_shifts, key=lambda r: r['recording']):
+            print(f'    {report["recording"]}')
+
+    if errors:
+        print()
+        print('Could not be read:')
+        for report in sorted(errors, key=lambda r: r['recording']):
+            print(f'    {report["recording"]}\n        {report["error"]}')
+
+    print()
+    print(f'{len(damaged)} of {len(rows)} recordings have shifted data.')
+    if channels:
+        breakdown = ', '.join(f'{name} ({n})' for name, n in channels.most_common())
+        print(f'Shifts by channel: {breakdown}.')
+    return 1 if damaged else 0
+
+
 def iter_recordings(paths, recursive):
     for path in paths:
         if path.is_file() or (path / 'experiment_log.txt').exists() \
@@ -467,8 +523,12 @@ def scan_main(argv=None):
     parser = argparse.ArgumentParser(
         description='Scan recordings for the fill block left by the zarr '
         'append-retry bug.')
-    parser.add_argument('paths', nargs='+', type=Path,
+    parser.add_argument('paths', nargs='*', type=Path,
                         help='Recordings, or directories of recordings')
+    parser.add_argument('--summarize', type=Path, metavar='REPORT',
+                        help='Summarize a report written earlier by --json '
+                        'instead of scanning. Prints only the recordings and '
+                        'channels with something wrong.')
     parser.add_argument('--recursive', action='store_true',
                         help='Search directories for recordings recursively')
     parser.add_argument('--min-samples', type=int, default=DEFAULT_MIN_SAMPLES,
@@ -495,6 +555,12 @@ def scan_main(argv=None):
     parser.add_argument('--json', type=Path,
                         help='Also write the full report to this file')
     args = parser.parse_args(argv)
+
+    if args.summarize:
+        return summarize_report(json.loads(args.summarize.read_text()))
+    if not args.paths:
+        parser.error('give at least one recording to scan, or --summarize a '
+                     'report written earlier')
 
     reports = []
     for path in iter_recordings(args.paths, args.recursive):

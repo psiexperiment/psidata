@@ -8,7 +8,8 @@ import pytest
 
 zarr = pytest.importorskip('zarr')
 
-from psidata.repair import find_fill_blocks, repair_main, scan_recording
+from psidata.repair import (find_fill_blocks, repair_main, scan_main,
+                            scan_recording)
 
 
 BLOCK = 1000
@@ -289,3 +290,50 @@ def test_recording_without_arrays(tmp_path):
     report = scan_recording(path)
     assert report['arrays'] == {}
     assert not report['suspect']
+
+
+def test_summarize_prints_only_problems(recording, tmp_path, capsys):
+    '''
+    The summary names damaged recordings and the channels to repair, and says
+    nothing about clean recordings, clean channels or notes.
+    '''
+    path, truth = recording
+    def build_clean(root):
+        array = zarr.create_array(store=str(root / 'eeg.zarr'), shape=(1, 0),
+                                  chunks=(1, 4096), dtype='f8',
+                                  attributes={'fs': 8000.0, 'engine': 'NI_a'})
+        array.append(np.random.default_rng(0).normal(size=(1, 5000)), axis=1)
+
+    clean = zip_arrays(tmp_path, 'clean', build_clean)
+    report_file = tmp_path / 'report.json'
+    assert scan_main([str(path), str(clean), '--min-samples', '100',
+                      '--json', str(report_file)]) == 1
+    capsys.readouterr()
+
+    assert scan_main(['--summarize', str(report_file)]) == 1
+    out = capsys.readouterr().out
+    assert str(path) in out
+    assert str(clean) not in out
+    assert out.count('eeg:') == 2 and out.count('mic:') == 1
+    assert 'note:' not in out
+    assert 'Shifts by channel: eeg (2), mic (1).' in out
+
+
+def test_summarize_separates_notes_and_errors(tmp_path, capsys):
+    report_file = tmp_path / 'report.json'
+    report_file.write_text(json.dumps([
+        {'recording': 'unreadable.zip', 'error': 'boom', 'suspect': False},
+        {'recording': 'length_only.zip', 'suspect': True, 'arrays': {},
+         'length_mismatch': [{'engine': 'NI_a', 'fs': 100.0,
+                              'lengths': {'a': 1, 'b': 2}}]},
+    ]))
+    assert scan_main(['--summarize', str(report_file)]) == 0    # no real damage
+    out = capsys.readouterr().out
+    assert 'length_only.zip' in out and 'only by a length difference' in out
+    assert 'unreadable.zip' in out and 'boom' in out
+    assert '0 of 2 recordings have shifted data.' in out
+
+
+def test_summarize_requires_a_report_or_paths():
+    with pytest.raises(SystemExit):
+        scan_main([])
