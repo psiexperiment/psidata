@@ -316,9 +316,9 @@ class SplitDatasetManager(BaseDatasetManager):
         '''
         super().__init__(path, cb=cb, file_template=file_template)
         if raw_dir is None:
-            raw_dir = os.environ.get('RAW_DATA_DIR', None)
+            raw_dir = os.environ.get('PSIDATA_RAW_DIR', None)
         if proc_dir is None:
-            proc_dir = os.environ.get('PROC_DATA_DIR', None)
+            proc_dir = os.environ.get('PSIDATA_PROC_DIR', None)
         self.raw_dir = Path(raw_dir)
         self.proc_dir = Path(proc_dir)
 
